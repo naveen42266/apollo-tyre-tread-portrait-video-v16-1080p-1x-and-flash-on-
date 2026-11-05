@@ -1,0 +1,1 @@
+export type Screen = "DASHBOARD" | "EXAMS" | "ASSIGNMENT" | "STUDENTS" | "DOCUMENTS" | "ATTENDANCE";
