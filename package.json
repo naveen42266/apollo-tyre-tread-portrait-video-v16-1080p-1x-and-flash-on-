@@ -17,6 +17,7 @@
     "@mui/material": "^5.17.1",
     "@reduxjs/toolkit": "^2.8.2",
     "date-fns": "^4.1.0",
+    "fix-webm-duration": "^1.0.6",
     "lucide-react": "^0.525.0",
     "mp4-muxer": "^5.2.2",
     "primereact": "^10.9.6",

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import fixWebmDurationLib from 'fix-webm-duration';
 // import InstructionVideo from "../../assets/instruction_video.mp4";
 import InstructionImg from "../../assets/instruction_img.jpeg";
 // ─── UTILITY: DETECT IOS / IPHONE ─────────────────────────────────────────────
@@ -103,38 +104,11 @@ const calculateAdaptiveBitrate = (width?: number, height?: number, frameRate?: n
 async function fixWebmDuration(blob: Blob, durationMs: number): Promise<Blob> {
   if (durationMs <= 0) return blob;
   try {
-    const buffer = await blob.arrayBuffer();
-    const view = new DataView(buffer);
-    const bytes = new Uint8Array(buffer);
-
-    for (let i = 0; i < bytes.length - 12; i++) {
-      if (
-        bytes[i] === 0x15 &&
-        bytes[i + 1] === 0x49 &&
-        bytes[i + 2] === 0xa9 &&
-        bytes[i + 3] === 0x66
-      ) {
-        const limit = Math.min(i + 250, bytes.length - 8);
-        for (let j = i + 4; j < limit; j++) {
-          if (bytes[j] === 0x44 && bytes[j + 1] === 0x89) {
-            const lengthByte = bytes[j + 2];
-            if (lengthByte === 0x84 && j + 7 <= bytes.length) {
-              view.setFloat32(j + 3, durationMs, false);
-              return new Blob([buffer], { type: blob.type });
-            }
-            if (lengthByte === 0x88 && j + 11 <= bytes.length) {
-              view.setFloat64(j + 3, durationMs, false);
-              return new Blob([buffer], { type: blob.type });
-            }
-          }
-        }
-        break;
-      }
-    }
+    return await fixWebmDurationLib(blob, durationMs);
   } catch (err) {
     console.warn('WebM duration metadata patch skipped:', err);
+    return blob;
   }
-  return blob;
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -319,6 +293,7 @@ const CameraCaptureAndroid: React.FC<CameraCaptureProps> = ({ onClose, onCapture
   const recorderChunksRef = useRef<Blob[]>([]);
   const mimeTypeRef = useRef<string>('');
   const recordingDurationRef = useRef<number>(0);
+  const recordingStartTimeRef = useRef<number>(0);
 
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -532,14 +507,17 @@ const CameraCaptureAndroid: React.FC<CameraCaptureProps> = ({ onClose, onCapture
       }
 
       if (actualType.includes('webm')) {
-        const durationMs = (recordingDurationRef.current || 1) * 1000;
-        blob = await fixWebmDuration(blob, durationMs);
+        const exactDurationMs = recordingStartTimeRef.current > 0
+          ? Math.max(Math.round(performance.now() - recordingStartTimeRef.current), 500)
+          : (recordingDurationRef.current || 1) * 1000;
+        blob = await fixWebmDuration(blob, exactDurationMs);
       }
 
       setIsProcessing(false);
       onCapture(URL.createObjectURL(blob), actualType);
     };
 
+    recordingStartTimeRef.current = performance.now();
     recorder.start();
     return true;
   };
@@ -1131,6 +1109,7 @@ const CameraCaptureIOS: React.FC<CameraCaptureProps> = ({ onClose, onCapture }) 
   const recorderChunksRef = useRef<Blob[]>([]);
   const mimeTypeRef = useRef<string>('');
   const recordingDurationRef = useRef<number>(0);
+  const recordingStartTimeRef = useRef<number>(0);
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const canvasRafRef = useRef<number | null>(null);
@@ -1457,12 +1436,19 @@ const CameraCaptureIOS: React.FC<CameraCaptureProps> = ({ onClose, onCapture }) 
           canvasRef.current = null;
 
           const actualType = mimeTypeRef.current || 'video/mp4';
-          const blob = new Blob(recorderChunksRef.current, { type: actualType });
+          let blob = new Blob(recorderChunksRef.current, { type: actualType });
           if (blob.size === 0) { console.error('Canvas recording produced empty video.'); setIsProcessing(false); return; }
+          if (actualType.includes('webm')) {
+            const exactDurationMs = recordingStartTimeRef.current > 0
+              ? Math.max(Math.round(performance.now() - recordingStartTimeRef.current), 500)
+              : (recordingDurationRef.current || 1) * 1000;
+            blob = await fixWebmDuration(blob, exactDurationMs);
+          }
           setIsProcessing(false);
           onCapture(URL.createObjectURL(blob), actualType);
         };
 
+        recordingStartTimeRef.current = performance.now();
         canvasRecorder.start();
       }
     );
